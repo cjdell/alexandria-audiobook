@@ -1,0 +1,23 @@
+# Alexandria on ROCm (AMD): swaps the CUDA PyTorch from the upstream CUDA base
+# for the ROCm 6.4 build so the built-in Qwen3-TTS can use the Radeon 660M iGPU
+# (gfx1035) via /dev/kfd + /dev/dri. aibox-only. Build:
+#   sudo podman build -f Dockerfile.rocm -t localhost/alexandria:rocm .
+FROM localhost/alexandria:latest
+
+# Drop the CUDA-base torch + triton, then install the version-matched ROCm
+# wheel (self-contained; pulls pytorch-triton-rocm from the same index).
+RUN pip uninstall -y torch triton 2>/dev/null || true \
+ && pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/rocm6.4 \
+      torch==2.8.0+rocm6.4
+
+# The CUDA-base torchvision/torchaudio are compiled against CUDA torch and
+# must not stay behind: importing torchvision crashes with "operator
+# torchvision::nms does not exist" (breaks transformers.AutoProcessor), and
+# qwen_tts imports torchaudio.compliance.kaldi. Install the ROCm-matching
+# torchaudio (2.8.0 pairs with torch 2.8.0) and drop torchvision entirely —
+# transformers guards against its absence (audio app, no vision needed).
+RUN pip uninstall -y torchvision 2>/dev/null || true \
+ && pip install --no-cache-dir \
+      --index-url https://download.pytorch.org/whl/rocm6.4 \
+      torchaudio==2.8.0+rocm6.4

@@ -11,6 +11,30 @@ DEFAULT_PAUSE_MS = 500  # Pause between different speakers
 SAME_SPEAKER_PAUSE_MS = 250  # Shorter pause for same speaker continuing
 
 
+def _compute_dtype(device):
+    """Pick the compute dtype for TTS model loads.
+
+    bf16 on NVIDIA CUDA and ROCm discrete GPUs. AMD iGPUs (APUs - device
+    name like "Radeon 660M"/"680M") segfault the HIP runtime on bf16 GEMMs
+    (SIGSEGV inside torch Linear on gfx1035/Rembrandt; rocm6.4 wheels), so
+    fall back to fp32 there. Verified on aibox's Radeon 660M (2026-09-02).
+    """
+    import torch
+
+    if "cuda" not in device:
+        return torch.float32
+    if torch.version.hip:
+        try:
+            name = torch.cuda.get_device_name(0)
+        except Exception:
+            name = ""
+        if re.search(r"\b\d+M\b", name):  # APU (660M/680M/...) not RX 6600
+            return torch.float32
+    return torch.bfloat16
+
+
+
+
 def sanitize_filename(name):
     """Make a string safe for use in filenames"""
     name = re.sub(r'[^\w\-]', '_', name)
@@ -499,7 +523,7 @@ class TTSEngine:
             from qwen_tts import Qwen3TTSModel
 
             device = self._resolve_device()
-            dtype = torch.bfloat16 if "cuda" in device else torch.float32
+            dtype = _compute_dtype(device)
 
             print(f"Loading Qwen3-TTS CustomVoice model on {device} ({dtype})...")
             load_kwargs = {"dtype": dtype}
@@ -528,7 +552,7 @@ class TTSEngine:
             from qwen_tts import Qwen3TTSModel
 
             device = self._resolve_device()
-            dtype = torch.bfloat16 if "cuda" in device else torch.float32
+            dtype = _compute_dtype(device)
 
             print(f"Loading Qwen3-TTS Base model (voice cloning) on {device} ({dtype})...")
             load_kwargs = {"dtype": dtype}
@@ -557,7 +581,7 @@ class TTSEngine:
             from qwen_tts import Qwen3TTSModel
 
             device = self._resolve_device()
-            dtype = torch.bfloat16 if "cuda" in device else torch.float32
+            dtype = _compute_dtype(device)
 
             print(f"Loading Qwen3-TTS VoiceDesign model on {device} ({dtype})...")
             load_kwargs = {"dtype": dtype}
@@ -600,7 +624,7 @@ class TTSEngine:
             from peft import PeftModel
 
             device = self._resolve_device()
-            dtype = torch.bfloat16 if "cuda" in device else torch.float32
+            dtype = _compute_dtype(device)
 
             print(f"Loading Qwen3-TTS Base model + LoRA adapter on {device} ({dtype})...")
             load_kwargs = {"dtype": dtype}

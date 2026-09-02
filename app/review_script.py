@@ -276,7 +276,7 @@ def main():
             print(f"Warning: Source file not found: {args.source}")
 
     # Load config
-    config_path = os.path.join(os.path.dirname(__file__), "config.json")
+    config_path = os.environ.get("ALEXANDRIA_CONFIG_PATH") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
     config = {}
     if os.path.exists(config_path):
         try:
@@ -314,6 +314,24 @@ def main():
         print(f"Banned tokens: {banned_tokens}")
 
     client = OpenAI(base_url=base_url, api_key=api_key)
+
+    # DeepSeek's OpenAI-compatible API enables hidden "thinking" on deepseek-v4-*
+    # by default; the reasoning burns the whole max_tokens budget and no content/
+    # JSON is ever emitted (finish_reason=length). Disable it unless the config
+    # provides explicit llm.extra_body overrides.
+    llm_extra = (llm_config.get("extra_body") or {})
+    if not llm_extra and "deepseek.com" in (base_url or ""):
+        llm_extra = {"thinking": {"type": "disabled"}}
+    if llm_extra:
+        _orig_create = client.chat.completions.create
+
+        def _create(*_args, _orig=_orig_create, _extra=llm_extra, **_kw):
+            merged = dict(_extra)
+            merged.update(_kw.get("extra_body") or {})
+            _kw["extra_body"] = merged
+            return _orig(*_args, **_kw)
+
+        client.chat.completions.create = _create
 
     all_corrected = []
     total_stats = {
